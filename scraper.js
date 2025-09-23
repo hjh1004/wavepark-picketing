@@ -1,8 +1,3 @@
-// ========================================
-// 웨이브파크 Puppeteer 스크래퍼
-// Headless 브라우저로 렌더링된 DOM 파싱
-// ========================================
-
 const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
 
@@ -15,6 +10,23 @@ const CONFIG = {
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID
 };
+
+// ===== 유틸리티 함수들 =====
+// 대기 함수 (waitForTimeout 대체)
+function delay(time) {
+  return new Promise(resolve => setTimeout(resolve, time));
+}
+
+// 요소가 나타날 때까지 대기하는 함수
+async function waitForElement(page, selector, timeout = 10000) {
+  try {
+    await page.waitForSelector(selector, { timeout });
+    return true;
+  } catch (e) {
+    console.log(`요소를 찾을 수 없음: ${selector}`);
+    return false;
+  }
+}
 
 // ===== 메인 스크래핑 함수 =====
 async function scrapeWavePark() {
@@ -54,15 +66,14 @@ async function scrapeWavePark() {
     });
     
     // 추가 대기 (동적 콘텐츠 로딩)
-    await page.waitForTimeout(5000);
+    // waitForTimeout 대신 다른 방법 사용
+    await new Promise(resolve => setTimeout(resolve, 5000));
     
     // 잔여좌우 요소가 로드될 때까지 대기
-    try {
-      await page.waitForSelector('[data-framer-name="잔여좌우"]', {
-        timeout: 10000
-      });
+    const foundElement = await waitForElement(page, '[data-framer-name="잔여좌우"]', 10000);
+    if (foundElement) {
       console.log('잔여좌우 요소 발견!');
-    } catch (e) {
+    } else {
       console.log('잔여좌우 요소를 찾을 수 없습니다. 계속 진행...');
     }
     
@@ -98,21 +109,69 @@ async function scrapeWavePark() {
       let currentDate = null;
       let currentTime = null;
       let currentLevel = null;
+      let dateMap = {}; // 날짜별 인덱스 저장
+      
+      // 먼저 모든 날짜를 찾아서 위치 저장
+      for (let i = 0; i < allTexts.length; i++) {
+        const text = allTexts[i].text;
+        
+        // 날짜 패턴: "9/27 (토)", "9/28 (일)" 등
+        const dateMatch = text.match(/^(\d{1,2})\/(\d{1,2})\s*\([월화수목금토일]\)$/);
+        if (dateMatch) {
+          const month = parseInt(dateMatch[1]);
+          const day = parseInt(dateMatch[2]);
+          const dateStr = `2024-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          dateMap[i] = dateStr;
+          console.log(`날짜 발견: ${text} -> ${dateStr} at index ${i}`);
+        }
+      }
+      
+      // 날짜 인덱스를 기준으로 현재 날짜 결정
+      function getCurrentDateForIndex(index) {
+        let selectedDate = null;
+        let minDistance = Infinity;
+        
+        for (const [dateIndex, date] of Object.entries(dateMap)) {
+          const distance = index - parseInt(dateIndex);
+          if (distance >= 0 && distance < minDistance) {
+            minDistance = distance;
+            selectedDate = date;
+          }
+        }
+        
+        // 날짜를 못 찾으면 현재 날짜 또는 기본값 사용
+        if (!selectedDate) {
+          const today = new Date();
+          const month = today.getMonth() + 1;
+          const day = today.getDate();
+          
+          // 9월 27일 또는 28일이 가까운 날짜 선택
+          if (day <= 27) {
+            selectedDate = '2024-09-27';
+          } else {
+            selectedDate = '2024-09-28';
+          }
+        }
+        
+        return selectedDate;
+      }
       
       for (let i = 0; i < allTexts.length; i++) {
         const item = allTexts[i];
         const text = item.text;
         
-        // 날짜 패턴: "9/27 (토)"
-        if (text.match(/^\d{1,2}\/\d{1,2}\s*\([월화수목금토일]\)$/)) {
-          const match = text.match(/(\d{1,2})\/(\d{1,2})/);
-          if (match) {
-            currentDate = `2024-${match[1].padStart(2, '0')}-${match[2].padStart(2, '0')}`;
-          }
+        // 현재 인덱스에 해당하는 날짜 업데이트
+        if (dateMap[i]) {
+          currentDate = dateMap[i];
         }
+        
         // 시간 패턴: "10:00"
-        else if (text.match(/^\d{2}:00$/)) {
+        if (text.match(/^\d{2}:00$/)) {
           currentTime = text;
+          // 시간이 바뀌면 현재 날짜를 다시 계산
+          if (!currentDate) {
+            currentDate = getCurrentDateForIndex(i);
+          }
         }
         // 레벨 패턴
         else if (text === '상급' || text === '중급' || text === '초급') {
@@ -122,8 +181,14 @@ async function scrapeWavePark() {
           const parent = item.element.closest('div[style*="background-color"]');
           if (parent) {
             const style = parent.getAttribute('style');
-            if (style && style.includes('rgb(239, 68, 68)')) {
-              currentLevel = '상급';
+            if (style) {
+              if (style.includes('rgb(239, 68, 68)') || style.includes('rgb(239,68,68)')) {
+                currentLevel = '상급';
+              } else if (style.includes('rgb(59, 130, 246)') || style.includes('rgb(59,130,246)')) {
+                currentLevel = '중급';
+              } else if (style.includes('rgb(235, 179, 5)') || style.includes('rgb(235,179,5)')) {
+                currentLevel = '초급';
+              }
             }
           }
         }
@@ -147,27 +212,34 @@ async function scrapeWavePark() {
             
             // 상급만 저장
             if (currentLevel === '상급' && (leftSeats + rightSeats) > 0) {
+              // 날짜가 없으면 현재 인덱스 기준으로 계산
+              const finalDate = currentDate || getCurrentDateForIndex(i);
+              
               results.push({
-                date: currentDate,
-                time: currentTime,
+                date: finalDate,
+                time: currentTime || '시간미확인',
                 level: currentLevel,
                 leftSeats: leftSeats,
                 rightSeats: rightSeats,
                 totalSeats: leftSeats + rightSeats,
                 raw: text
               });
+              
+              console.log(`상급 티켓 추가: ${finalDate} ${currentTime} - ${text}`);
             }
           }
         }
       }
       
-      // 추가 방법: 직접 선택자로 찾기
-      const seatDivs = document.querySelectorAll('[data-framer-name="잔여좌우"]');
-      console.log(`잔여좌우 요소 ${seatDivs.length}개 발견`);
-      
-      seatDivs.forEach(div => {
-        const text = div.textContent.trim();
-        console.log(`잔여좌우 텍스트: ${text}`);
+      // 디버깅: 전체 텍스트 중 일부 출력
+      console.log('=== 텍스트 샘플 (날짜/시간/레벨/좌석) ===');
+      allTexts.forEach((item, i) => {
+        if (item.text.match(/^\d{1,2}\/\d{1,2}\s*\(/) || 
+            item.text.match(/^\d{2}:00$/) ||
+            item.text.match(/^(상급|중급|초급)$/) ||
+            item.text.match(/^\d+\/\d+$/)) {
+          console.log(`[${i}] ${item.text}`);
+        }
       });
       
       return results;
@@ -317,7 +389,21 @@ if (require.main === module) {
 
 module.exports = { scrapeWavePark };
 
-
+// ===== package.json =====
+/*
+{
+  "name": "wavepark-scraper",
+  "version": "1.0.0",
+  "main": "scraper.js",
+  "scripts": {
+    "start": "node scraper.js",
+    "test": "node scraper.js"
+  },
+  "dependencies": {
+    "puppeteer": "^21.0.0"
+  }
+}
+*/
 
 // ===== Docker 실행 (선택사항) =====
 /*
@@ -339,27 +425,3 @@ COPY . .
 
 CMD ["node", "scraper.js"]
 */
-
-// ===== GitHub Actions 실행 (선택사항) =====
-// /*
-// name: WavePark Scraper
-
-// on:
-//   schedule:
-//     - cron: '*/10 * * * *'
-//   workflow_dispatch:
-
-// jobs:
-//   scrape:
-//     runs-on: ubuntu-latest
-//     steps:
-//     - uses: actions/checkout@v3
-//     - uses: actions/setup-node@v3
-//       with:
-//         node-version: '18'
-//     - run: npm ci
-//     - run: npm start
-//       env:
-//         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-//         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-// */
