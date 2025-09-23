@@ -1,0 +1,44 @@
+name: WavePark Monitor
+
+# 실행 조건
+on:
+  # n분마다 자동 실행
+  schedule:
+    - cron: '*/5 * * * *'
+  
+  # 수동 실행 가능
+  workflow_dispatch:
+  
+  # 푸시할 때마다 실행 (테스트용)
+  push:
+    branches: [ main ]
+
+jobs:
+  check-tickets:
+    runs-on: ubuntu-latest
+    
+    steps:
+    # 1. 코드 체크아웃
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    # 2. Node.js 설치
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+    
+    # 3. 의존성 설치
+    - name: Install dependencies
+      run: |
+        npm install
+    
+    # 4. 스크래퍼 실행
+    - name: Run scraper
+      run: |
+        npm start
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+    
