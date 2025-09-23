@@ -2,9 +2,9 @@ name: WavePark Monitor
 
 # 실행 조건
 on:
-  # n분마다 자동 실행
+  # 10분마다 자동 실행
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/10 * * * *'
   
   # 수동 실행 가능
   workflow_dispatch:
