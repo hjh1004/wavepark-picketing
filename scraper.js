@@ -1,12 +1,20 @@
+// ========================================
+// 웨이브파크 Puppeteer 스크래퍼
+// Headless 브라우저로 렌더링된 DOM 파싱
+// ========================================
+
 const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
 
 // ===== 설정 =====
 const CONFIG = {
   URL: 'https://wavepark.framer.website/',
-  TARGET_DATES: ['2024-09-27', '2024-09-28'],
+  TARGET_DATES: ['2024-09-27', '2024-09-28'], // 원하는 날짜
+  TARGET_LEVELS: ['초급', '상급'], // 모니터링할 레벨: ['초급'], ['중급'], ['상급'], ['초급', '중급', '상급']
+  INCLUDE_TODAY: false, // 오늘 날짜도 포함할지 여부
+  INCLUDE_ALL_DATES: false, // 모든 날짜 포함 (테스트용)
   DEBUG: true,
-  WEBHOOK_URL: process.env.WEBHOOK_URL || '', // Google Apps Script Web App URL
+  WEBHOOK_URL: process.env.WEBHOOK_URL || '',
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID
 };
@@ -57,6 +65,23 @@ async function scrapeWavePark() {
     // 뷰포트 설정
     await page.setViewport({ width: 1920, height: 1080 });
     
+    // 날짜 설정 자동화 옵션
+    if (CONFIG.INCLUDE_TODAY) {
+      const today = new Date().toISOString().split('T')[0];
+      if (!CONFIG.TARGET_DATES.includes(today)) {
+        CONFIG.TARGET_DATES.push(today);
+        console.log(`오늘 날짜(${today}) 추가됨`);
+      }
+    }
+    
+    if (CONFIG.INCLUDE_ALL_DATES) {
+      console.log('모든 날짜의 티켓을 모니터링합니다.');
+    }
+    
+    console.log('모니터링 대상:');
+    console.log('  - 날짜:', CONFIG.TARGET_DATES);
+    console.log('  - 레벨:', CONFIG.TARGET_LEVELS);
+    
     console.log('페이지 로딩 중...');
     
     // 페이지 이동
@@ -78,7 +103,7 @@ async function scrapeWavePark() {
     }
     
     // DOM에서 데이터 추출
-    const ticketData = await page.evaluate(() => {
+    const ticketData = await page.evaluate((CONFIG) => {
       const results = [];
       
       // 모든 텍스트 노드를 순서대로 수집
@@ -210,8 +235,8 @@ async function scrapeWavePark() {
               rightSeats = parts[1] === '-' ? 0 : parseInt(parts[1]) || 0;
             }
             
-            // 상급만 저장
-            if (currentLevel === '상급' && (leftSeats + rightSeats) > 0) {
+            // 원하는 레벨만 저장 (CONFIG.TARGET_LEVELS 확인)
+            if (CONFIG.TARGET_LEVELS.includes(currentLevel) && (leftSeats + rightSeats) > 0) {
               // 날짜가 없으면 현재 인덱스 기준으로 계산
               const finalDate = currentDate || getCurrentDateForIndex(i);
               
@@ -225,7 +250,7 @@ async function scrapeWavePark() {
                 raw: text
               });
               
-              console.log(`상급 티켓 추가: ${finalDate} ${currentTime} - ${text}`);
+              console.log(`${currentLevel} 티켓 추가: ${finalDate} ${currentTime} - ${text}`);
             }
           }
         }
@@ -243,27 +268,41 @@ async function scrapeWavePark() {
       });
       
       return results;
+    }, CONFIG);
+    
+    console.log(`추출된 티켓 (${CONFIG.TARGET_LEVELS.join(', ')} 레벨):`, ticketData);
+    console.log(`총 ${ticketData.length}개 티켓 발견`);
+    
+    // 타겟 날짜 필터링 - 디버깅을 위해 상세 로그 추가
+    console.log('타겟 날짜:', CONFIG.TARGET_DATES);
+    console.log('필터링 전 티켓 수:', ticketData.length);
+    
+    const filteredTickets = ticketData.filter(ticket => {
+      const isTargetDate = CONFIG.TARGET_DATES.includes(ticket.date);
+      if (!isTargetDate && CONFIG.DEBUG) {
+        console.log(`필터링됨: ${ticket.date} ${ticket.time} (타겟 날짜 아님)`);
+      }
+      return isTargetDate;
     });
     
-    console.log('추출된 상급 티켓:', ticketData);
+    console.log('필터링 후 티켓 수:', filteredTickets.length);
     
-    // 타겟 날짜 필터링
-    const filteredTickets = ticketData.filter(ticket => 
-      CONFIG.TARGET_DATES.includes(ticket.date)
-    );
+    // 최종 필터링 로직 개선
+    let finalTickets = [];
     
-    // 스크린샷 저장 (디버깅용)
-    if (CONFIG.DEBUG) {
-      await page.screenshot({ 
-        path: 'wavepark_screenshot.png',
-        fullPage: true 
+    if (CONFIG.INCLUDE_ALL_DATES) {
+      // 모든 날짜 포함
+      finalTickets = ticketData;
+      console.log('모든 날짜의 티켓 포함');
+    } else {
+      // 타겟 날짜만 필터링
+      finalTickets = ticketData.filter(ticket => {
+        const isTargetDate = CONFIG.TARGET_DATES.includes(ticket.date);
+        if (!isTargetDate && CONFIG.DEBUG) {
+          console.log(`필터링됨: ${ticket.date} ${ticket.time} (타겟 날짜 아님)`);
+        }
+        return isTargetDate;
       });
-      console.log('스크린샷 저장 완료: wavepark_screenshot.png');
-      
-      // HTML 저장
-      const html = await page.content();
-      await fs.writeFile('wavepark_dom.html', html);
-      console.log('HTML 저장 완료: wavepark_dom.html');
     }
     
     // 이전 상태 로드
@@ -277,30 +316,62 @@ async function scrapeWavePark() {
     
     // 새로운 티켓 찾기
     const newTickets = [];
-    filteredTickets.forEach(ticket => {
+    finalTickets.forEach(ticket => {
       const key = `${ticket.date}-${ticket.time}-${ticket.leftSeats}/${ticket.rightSeats}`;
-      if (!previousState[key] || previousState[key].totalSeats < ticket.totalSeats) {
+      
+      // 이전 상태와 비교
+      if (!previousState[key]) {
+        // 완전히 새로운 티켓
         newTickets.push(ticket);
+        console.log(`✅ 새 티켓: ${ticket.date} ${ticket.time} - ${ticket.raw}`);
+      } else if (previousState[key].totalSeats < ticket.totalSeats) {
+        // 좌석이 늘어난 경우
+        newTickets.push(ticket);
+        console.log(`📈 좌석 증가: ${ticket.date} ${ticket.time} - ${previousState[key].totalSeats} -> ${ticket.totalSeats}`);
       }
     });
     
     // 알림 발송
     if (newTickets.length > 0) {
-      console.log(`🎯 새로운 상급 티켓 ${newTickets.length}개 발견!`);
+      console.log(`\n🎯 새로운 티켓 ${newTickets.length}개 발견!`);
+      
+      // 레벨별로 그룹화하여 출력
+      const ticketsByLevel = {};
+      newTickets.forEach(ticket => {
+        if (!ticketsByLevel[ticket.level]) {
+          ticketsByLevel[ticket.level] = [];
+        }
+        ticketsByLevel[ticket.level].push(ticket);
+      });
+      
+      Object.keys(ticketsByLevel).forEach(level => {
+        console.log(`\n[${level}]`);
+        ticketsByLevel[level].forEach(t => {
+          console.log(`  - ${t.date} ${t.time}: 좌 ${t.leftSeats} / 우 ${t.rightSeats}`);
+        });
+      });
+      
       await sendNotifications(newTickets);
     } else {
-      console.log('새로운 상급 티켓 없음');
+      console.log(`\n😔 새로운 ${CONFIG.TARGET_LEVELS.join('/')} 티켓 없음`);
+      if (finalTickets.length > 0) {
+        console.log(`(기존 티켓 ${finalTickets.length}개는 이미 알림 발송됨)`);
+      }
     }
     
     // 상태 저장
     const newState = {};
-    filteredTickets.forEach(ticket => {
+    finalTickets.forEach(ticket => {
       const key = `${ticket.date}-${ticket.time}-${ticket.leftSeats}/${ticket.rightSeats}`;
-      newState[key] = ticket;
+      newState[key] = {
+        ...ticket,
+        savedAt: new Date().toISOString()
+      };
     });
     await fs.writeFile('state.json', JSON.stringify(newState, null, 2));
+    console.log('상태 저장 완료');
     
-    return filteredTickets;
+    return finalTickets;
     
   } catch (error) {
     console.error('스크래핑 에러:', error);
@@ -360,13 +431,25 @@ async function sendNotifications(tickets) {
 
 // ===== 메시지 포맷팅 =====
 function formatTelegramMessage(tickets) {
-  let message = '🏄 <b>웨이브파크 상급 티켓 예매 가능!</b>\n\n';
+  let message = '🏄 <b>웨이브파크 티켓 예매 가능!</b>\n\n';
   
+  // 레벨별로 그룹화
+  const ticketsByLevel = {};
   tickets.forEach(ticket => {
-    message += `📅 날짜: ${ticket.date}\n`;
-    message += `⏰ 시간: ${ticket.time}\n`;
-    message += `🎫 잔여: 좌측 ${ticket.leftSeats} / 우측 ${ticket.rightSeats}\n`;
-    message += `━━━━━━━━━━━━━━\n`;
+    if (!ticketsByLevel[ticket.level]) {
+      ticketsByLevel[ticket.level] = [];
+    }
+    ticketsByLevel[ticket.level].push(ticket);
+  });
+  
+  // 레벨별로 메시지 작성
+  Object.keys(ticketsByLevel).forEach(level => {
+    message += `<b>[${level}]</b>\n`;
+    ticketsByLevel[level].forEach(ticket => {
+      message += `📅 ${ticket.date} ${ticket.time}\n`;
+      message += `🎫 좌측 ${ticket.leftSeats} / 우측 ${ticket.rightSeats}\n`;
+      message += `━━━━━━━━━━━━━━\n`;
+    });
   });
   
   message += `\n🔗 <a href="${CONFIG.URL}">지금 바로 예매하기</a>`;
