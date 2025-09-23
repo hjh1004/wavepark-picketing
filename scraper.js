@@ -386,30 +386,30 @@ async function scrapeWavePark() {
 // ===== 알림 발송 함수 =====
 async function sendNotifications(tickets) {
   // 1. Telegram 알림
-  if (CONFIG.TELEGRAM_BOT_TOKEN && CONFIG.TELEGRAM_CHAT_ID) {
-    const message = formatTelegramMessage(tickets);
+  // if (CONFIG.TELEGRAM_BOT_TOKEN && CONFIG.TELEGRAM_CHAT_ID) {
+  //   const message = formatTelegramMessage(tickets);
     
-    try {
-      const response = await fetch(
-        `https://api.telegram.org/bot${CONFIG.TELEGRAM_BOT_TOKEN}/sendMessage`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: CONFIG.TELEGRAM_CHAT_ID,
-            text: message,
-            parse_mode: 'HTML'
-          })
-        }
-      );
+  //   try {
+  //     const response = await fetch(
+  //       `https://api.telegram.org/bot${CONFIG.TELEGRAM_BOT_TOKEN}/sendMessage`,
+  //       {
+  //         method: 'POST',
+  //         headers: { 'Content-Type': 'application/json' },
+  //         body: JSON.stringify({
+  //           chat_id: CONFIG.TELEGRAM_CHAT_ID,
+  //           text: message,
+  //           parse_mode: 'HTML'
+  //         })
+  //       }
+  //     );
       
-      if (response.ok) {
-        console.log('✅ Telegram 알림 발송 성공');
-      }
-    } catch (error) {
-      console.error('Telegram 알림 실패:', error);
-    }
-  }
+  //     if (response.ok) {
+  //       console.log('✅ Telegram 알림 발송 성공');
+  //     }
+  //   } catch (error) {
+  //     console.error('Telegram 알림 실패:', error);
+  //   }
+  // }
   
   // 2. Webhook (Google Apps Script) 알림
   if (CONFIG.WEBHOOK_URL) {
@@ -452,7 +452,7 @@ function formatTelegramMessage(tickets) {
     });
   });
   
-  message += `\n🔗 <a href="${CONFIG.URL}">지금 바로 예매하기</a>`;
+  message += `\n🔗 <a href="https://www.wavepark.co.kr/">지금 바로 예매하기</a>`;
   
   return message;
 }
