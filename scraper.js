@@ -9,8 +9,8 @@ const fs = require('fs').promises;
 // ===== 설정 =====
 const CONFIG = {
   URL: 'https://wavepark.framer.website/',
-  TARGET_DATES: ['2024-09-27', '2024-09-28'], // 원하는 날짜
-  TARGET_LEVELS: ['초급', '상급'], // 모니터링할 레벨: ['초급'], ['중급'], ['상급'], ['초급', '중급', '상급']
+  TARGET_DATES: ['2025-11-29', '2025-11-30'], // 원하는 날짜
+  TARGET_LEVELS: ['초급','중급', '상급'], // 모니터링할 레벨: ['초급'], ['중급'], ['상급'], ['초급', '중급', '상급']
   INCLUDE_TODAY: false, // 오늘 날짜도 포함할지 여부
   INCLUDE_ALL_DATES: false, // 모든 날짜 포함 (테스트용)
   DEBUG: true,
