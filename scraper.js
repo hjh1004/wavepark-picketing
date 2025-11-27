@@ -545,8 +545,28 @@ async function sendNotifications(tickets) {
   // 2. Webhook (Google Apps Script) 알림
   if (CONFIG.WEBHOOK_URL) {
     console.log('[NOTIFICATION] Webhook 알림 발송 시도...');
-    console.log(`[NOTIFICATION]   URL: ${CONFIG.WEBHOOK_URL.substring(0, 50)}...`);
+    console.log(`[NOTIFICATION]   URL: ${CONFIG.WEBHOOK_URL.substring(0, 80)}...`);
     console.log(`[NOTIFICATION]   티켓 수: ${tickets.length}개`);
+    
+    // URL 유효성 검사
+    if (!CONFIG.WEBHOOK_URL.startsWith('http://') && !CONFIG.WEBHOOK_URL.startsWith('https://')) {
+      console.error('[NOTIFICATION] ❌ 잘못된 URL 형식 (http:// 또는 https://로 시작해야 함)');
+      return;
+    }
+    
+    // Google Apps Script URL 확인
+    const isGoogleAppsScript = CONFIG.WEBHOOK_URL.includes('script.google.com') || 
+                                CONFIG.WEBHOOK_URL.includes('script.googleusercontent.com');
+    if (isGoogleAppsScript) {
+      console.log('[NOTIFICATION]   Google Apps Script URL 감지됨');
+      
+      // 잘못된 URL 패턴 확인
+      if (CONFIG.WEBHOOK_URL.includes('/edit') || CONFIG.WEBHOOK_URL.includes('/d/')) {
+        console.error('[NOTIFICATION] ⚠️ 경고: 스크립트 편집 URL이 아닌 배포 URL을 사용해야 합니다!');
+        console.error('[NOTIFICATION]   올바른 URL 형식: https://script.google.com/macros/s/SCRIPT_ID/exec');
+        console.error('[NOTIFICATION]   현재 URL이 /edit 또는 /d/를 포함하고 있습니다.');
+      }
+    }
     
     try {
       const response = await fetch(CONFIG.WEBHOOK_URL, {
@@ -559,16 +579,59 @@ async function sendNotifications(tickets) {
         console.log('[NOTIFICATION] ✅ Webhook 알림 발송 성공');
         const responseText = await response.text();
         if (CONFIG.DEBUG && responseText) {
-          console.log(`[NOTIFICATION]   응답: ${responseText.substring(0, 100)}`);
+          console.log(`[NOTIFICATION]   응답: ${responseText.substring(0, 200)}`);
         }
       } else {
         const errorText = await response.text();
-        console.error(`[NOTIFICATION] ❌ Webhook 알림 실패: ${response.status} - ${errorText}`);
+        console.error(`[NOTIFICATION] ❌ Webhook 알림 실패: ${response.status} ${response.statusText}`);
+        
+        // 403 에러 상세 분석
+        if (response.status === 403) {
+          console.error('[NOTIFICATION] ========================================');
+          console.error('[NOTIFICATION] 403 Forbidden 에러 원인 분석:');
+          console.error('[NOTIFICATION]');
+          
+          if (isGoogleAppsScript) {
+            console.error('[NOTIFICATION] Google Apps Script 접근 권한 문제입니다.');
+            console.error('[NOTIFICATION]');
+            console.error('[NOTIFICATION] 해결 방법:');
+            console.error('[NOTIFICATION] 1. Google Apps Script 프로젝트 열기');
+            console.error('[NOTIFICATION] 2. 우측 상단 "배포" > "새 배포" 클릭');
+            console.error('[NOTIFICATION] 3. 유형: "웹 앱" 선택');
+            console.error('[NOTIFICATION] 4. 실행 사용자: "나" 선택');
+            console.error('[NOTIFICATION] 5. 액세스 권한: "모든 사용자" 선택');
+            console.error('[NOTIFICATION] 6. 배포 후 생성된 URL 사용 (형식: .../exec)');
+            console.error('[NOTIFICATION]');
+            console.error('[NOTIFICATION] ⚠️ 스크립트 편집 URL(/edit)이 아닌 배포 URL(/exec)을 사용해야 합니다!');
+          } else {
+            console.error('[NOTIFICATION] Webhook 서버에서 접근을 거부했습니다.');
+            console.error('[NOTIFICATION] - URL이 올바른지 확인');
+            console.error('[NOTIFICATION] - 서버의 인증/권한 설정 확인');
+            console.error('[NOTIFICATION] - CORS 설정 확인');
+          }
+          console.error('[NOTIFICATION] ========================================');
+        }
+        
+        // 에러 응답 내용 출력 (HTML이 아닌 경우)
+        if (errorText && !errorText.trim().startsWith('<!DOCTYPE')) {
+          console.error(`[NOTIFICATION]   에러 메시지: ${errorText.substring(0, 500)}`);
+        } else if (errorText && errorText.includes('Access Denied')) {
+          console.error(`[NOTIFICATION]   "Access Denied" 페이지가 반환되었습니다.`);
+          console.error(`[NOTIFICATION]   이는 접근 권한이 없음을 의미합니다.`);
+        }
       }
     } catch (error) {
-      console.error('[NOTIFICATION] ❌ Webhook 알림 에러:', error.message);
+      console.error('[NOTIFICATION] ❌ Webhook 알림 네트워크 에러:', error.message);
       if (CONFIG.DEBUG) {
         console.error('[NOTIFICATION]   스택:', error.stack);
+      }
+      
+      // 네트워크 에러 상세 정보
+      if (error.message.includes('fetch')) {
+        console.error('[NOTIFICATION]   네트워크 연결 문제일 수 있습니다.');
+        console.error('[NOTIFICATION]   - 인터넷 연결 확인');
+        console.error('[NOTIFICATION]   - URL이 올바른지 확인');
+        console.error('[NOTIFICATION]   - 방화벽/프록시 설정 확인');
       }
     }
   } else {
