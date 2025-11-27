@@ -41,7 +41,12 @@ async function scrapeWavePark() {
   let browser;
   
   try {
+    console.log('='.repeat(60));
+    console.log('🚀 웨이브파크 스크래퍼 시작');
+    console.log('='.repeat(60));
+    
     // 브라우저 시작
+    console.log('[DEBUG] 브라우저 시작 중...');
     browser = await puppeteer.launch({
       headless: 'new',
       args: [
@@ -56,56 +61,67 @@ async function scrapeWavePark() {
         '--disable-features=IsolateOrigins,site-per-process'
       ]
     });
+    console.log('[DEBUG] ✅ 브라우저 시작 완료');
 
     const page = await browser.newPage();
+    console.log('[DEBUG] 새 페이지 생성 완료');
     
     // User Agent 설정
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     
     // 뷰포트 설정
     await page.setViewport({ width: 1920, height: 1080 });
+    console.log('[DEBUG] 뷰포트 설정: 1920x1080');
     
     // 날짜 설정 자동화 옵션
     if (CONFIG.INCLUDE_TODAY) {
       const today = new Date().toISOString().split('T')[0];
       if (!CONFIG.TARGET_DATES.includes(today)) {
         CONFIG.TARGET_DATES.push(today);
-        console.log(`오늘 날짜(${today}) 추가됨`);
+        console.log(`[DEBUG] 오늘 날짜(${today}) 추가됨`);
       }
     }
     
     if (CONFIG.INCLUDE_ALL_DATES) {
-      console.log('모든 날짜의 티켓을 모니터링합니다.');
+      console.log('[DEBUG] ⚠️ 모든 날짜의 티켓을 모니터링합니다.');
     }
     
-    console.log('모니터링 대상:');
-    console.log('  - 날짜:', CONFIG.TARGET_DATES);
-    console.log('  - 레벨:', CONFIG.TARGET_LEVELS);
+    console.log('[DEBUG] 모니터링 대상:');
+    console.log('[DEBUG]   - 날짜:', CONFIG.TARGET_DATES);
+    console.log('[DEBUG]   - 레벨:', CONFIG.TARGET_LEVELS);
+    console.log('[DEBUG]   - DEBUG 모드:', CONFIG.DEBUG);
+    console.log('[DEBUG]   - INCLUDE_TODAY:', CONFIG.INCLUDE_TODAY);
+    console.log('[DEBUG]   - INCLUDE_ALL_DATES:', CONFIG.INCLUDE_ALL_DATES);
     
-    console.log('페이지 로딩 중...');
+    console.log('[DEBUG] 페이지 로딩 중...');
     
     // 페이지 이동
     await page.goto(CONFIG.URL, {
       waitUntil: 'networkidle2',
       timeout: 30000
     });
+    console.log('[DEBUG] ✅ 페이지 로딩 완료:', CONFIG.URL);
     
     // 추가 대기 (동적 콘텐츠 로딩)
-    // waitForTimeout 대신 다른 방법 사용
+    console.log('[DEBUG] 동적 콘텐츠 로딩 대기 중 (5초)...');
     await new Promise(resolve => setTimeout(resolve, 5000));
+    console.log('[DEBUG] ✅ 대기 완료');
     
     // 잔여좌우 요소가 로드될 때까지 대기
+    console.log('[DEBUG] 잔여좌우 요소 검색 중...');
     const foundElement = await waitForElement(page, '[data-framer-name="잔여좌우"]', 10000);
     if (foundElement) {
-      console.log('잔여좌우 요소 발견!');
+      console.log('[DEBUG] ✅ 잔여좌우 요소 발견!');
     } else {
-      console.log('잔여좌우 요소를 찾을 수 없습니다. 계속 진행...');
+      console.log('[DEBUG] ⚠️ 잔여좌우 요소를 찾을 수 없습니다. 계속 진행...');
     }
     
     // DOM에서 데이터 추출
+    console.log('[DEBUG] DOM에서 데이터 추출 시작...');
     const ticketData = await page.evaluate((CONFIG) => {
       const results = [];
       
+      console.log('[DOM] 텍스트 노드 수집 시작...');
       // 모든 텍스트 노드를 순서대로 수집
       const allTexts = [];
       const walker = document.createTreeWalker(
@@ -129,6 +145,7 @@ async function scrapeWavePark() {
           element: node.parentElement
         });
       }
+      console.log(`[DOM] 총 ${allTexts.length}개의 텍스트 노드 수집 완료`);
       
       // 데이터 파싱
       let currentDate = null;
@@ -136,7 +153,14 @@ async function scrapeWavePark() {
       let currentLevel = null;
       let dateMap = {}; // 날짜별 인덱스 저장
       
+      // 현재 연도 추출 (TARGET_DATES에서 첫 번째 날짜의 연도 사용)
+      const currentYear = CONFIG.TARGET_DATES && CONFIG.TARGET_DATES.length > 0 
+        ? CONFIG.TARGET_DATES[0].split('-')[0] 
+        : new Date().getFullYear().toString();
+      console.log(`[DOM] 사용할 연도: ${currentYear}`);
+      
       // 먼저 모든 날짜를 찾아서 위치 저장
+      console.log('[DOM] 날짜 패턴 검색 중...');
       for (let i = 0; i < allTexts.length; i++) {
         const text = allTexts[i].text;
         
@@ -145,11 +169,12 @@ async function scrapeWavePark() {
         if (dateMatch) {
           const month = parseInt(dateMatch[1]);
           const day = parseInt(dateMatch[2]);
-          const dateStr = `2024-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          const dateStr = `${currentYear}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
           dateMap[i] = dateStr;
-          console.log(`날짜 발견: ${text} -> ${dateStr} at index ${i}`);
+          console.log(`[DOM] 날짜 발견: "${text}" -> ${dateStr} (인덱스: ${i})`);
         }
       }
+      console.log(`[DOM] 총 ${Object.keys(dateMap).length}개의 날짜 발견`);
       
       // 날짜 인덱스를 기준으로 현재 날짜 결정
       function getCurrentDateForIndex(index) {
@@ -164,22 +189,30 @@ async function scrapeWavePark() {
           }
         }
         
-        // 날짜를 못 찾으면 현재 날짜 또는 기본값 사용
+        // 날짜를 못 찾으면 TARGET_DATES의 첫 번째 날짜 사용
         if (!selectedDate) {
-          const today = new Date();
-          const month = today.getMonth() + 1;
-          const day = today.getDate();
-          
-          // 9월 27일 또는 28일이 가까운 날짜 선택
-          if (day <= 27) {
-            selectedDate = '2024-09-27';
+          if (CONFIG.TARGET_DATES && CONFIG.TARGET_DATES.length > 0) {
+            selectedDate = CONFIG.TARGET_DATES[0];
+            console.log(`[DOM] 날짜를 찾을 수 없어 기본값 사용: ${selectedDate} (인덱스: ${index})`);
           } else {
-            selectedDate = '2024-09-28';
+            const today = new Date();
+            const year = today.getFullYear();
+            const month = String(today.getMonth() + 1).padStart(2, '0');
+            const day = String(today.getDate()).padStart(2, '0');
+            selectedDate = `${year}-${month}-${day}`;
+            console.log(`[DOM] 날짜를 찾을 수 없어 오늘 날짜 사용: ${selectedDate} (인덱스: ${index})`);
           }
+        } else {
+          console.log(`[DOM] 날짜 결정: ${selectedDate} (인덱스: ${index}, 거리: ${minDistance})`);
         }
         
         return selectedDate;
       }
+      
+      console.log('[DOM] 티켓 데이터 파싱 시작...');
+      let timeCount = 0;
+      let levelCount = 0;
+      let seatCount = 0;
       
       for (let i = 0; i < allTexts.length; i++) {
         const item = allTexts[i];
@@ -188,19 +221,23 @@ async function scrapeWavePark() {
         // 현재 인덱스에 해당하는 날짜 업데이트
         if (dateMap[i]) {
           currentDate = dateMap[i];
+          console.log(`[DOM] 현재 날짜 업데이트: ${currentDate} (인덱스: ${i})`);
         }
         
         // 시간 패턴: "10:00"
         if (text.match(/^\d{2}:00$/)) {
           currentTime = text;
+          timeCount++;
           // 시간이 바뀌면 현재 날짜를 다시 계산
           if (!currentDate) {
             currentDate = getCurrentDateForIndex(i);
           }
+          console.log(`[DOM] 시간 발견: ${currentTime} (인덱스: ${i}, 날짜: ${currentDate})`);
         }
         // 레벨 패턴
         else if (text === '상급' || text === '중급' || text === '초급') {
           currentLevel = text;
+          levelCount++;
           
           // 배경색 확인 (더 정확한 레벨 판단)
           const parent = item.element.closest('div[style*="background-color"]');
@@ -216,9 +253,11 @@ async function scrapeWavePark() {
               }
             }
           }
+          console.log(`[DOM] 레벨 발견: ${currentLevel} (인덱스: ${i})`);
         }
         // 좌석 패턴: "숫자/숫자", "-/숫자", "숫자/-", "매진"
         else if (text.match(/^(-?\d+|-)\/(-?\d+|-)$/) || text === '매진') {
+          seatCount++;
           // 잔여좌우 요소인지 확인
           const isInSeatDiv = item.element.closest('[data-framer-name="잔여좌우"]') !== null;
           
@@ -236,11 +275,14 @@ async function scrapeWavePark() {
             }
             
             // 원하는 레벨만 저장 (CONFIG.TARGET_LEVELS 확인)
-            if (CONFIG.TARGET_LEVELS.includes(currentLevel) && (leftSeats + rightSeats) > 0) {
+            const isTargetLevel = CONFIG.TARGET_LEVELS.includes(currentLevel);
+            const hasSeats = (leftSeats + rightSeats) > 0;
+            
+            if (isTargetLevel && hasSeats) {
               // 날짜가 없으면 현재 인덱스 기준으로 계산
               const finalDate = currentDate || getCurrentDateForIndex(i);
               
-              results.push({
+              const ticket = {
                 date: finalDate,
                 time: currentTime || '시간미확인',
                 level: currentLevel,
@@ -248,74 +290,127 @@ async function scrapeWavePark() {
                 rightSeats: rightSeats,
                 totalSeats: leftSeats + rightSeats,
                 raw: text
-              });
+              };
               
-              console.log(`${currentLevel} 티켓 추가: ${finalDate} ${currentTime} - ${text}`);
+              results.push(ticket);
+              console.log(`[DOM] ✅ 티켓 추가: ${currentLevel} - ${finalDate} ${currentTime} - 좌${leftSeats}/우${rightSeats} (${text})`);
+            } else {
+              if (!isTargetLevel) {
+                console.log(`[DOM] ⏭️ 레벨 필터링: ${currentLevel} (타겟 레벨 아님, 인덱스: ${i})`);
+              }
+              if (!hasSeats) {
+                console.log(`[DOM] ⏭️ 좌석 없음: ${text} (인덱스: ${i})`);
+              }
             }
+          } else {
+            console.log(`[DOM] ⏭️ 좌석 패턴 무시: ${text} (잔여좌우 요소 아님, 인덱스: ${i})`);
           }
         }
       }
       
-      // 디버깅: 전체 텍스트 중 일부 출력
-      console.log('=== 텍스트 샘플 (날짜/시간/레벨/좌석) ===');
-      allTexts.forEach((item, i) => {
-        if (item.text.match(/^\d{1,2}\/\d{1,2}\s*\(/) || 
-            item.text.match(/^\d{2}:00$/) ||
-            item.text.match(/^(상급|중급|초급)$/) ||
-            item.text.match(/^\d+\/\d+$/)) {
-          console.log(`[${i}] ${item.text}`);
-        }
-      });
+      console.log(`[DOM] 파싱 완료 - 시간: ${timeCount}개, 레벨: ${levelCount}개, 좌석 패턴: ${seatCount}개, 티켓: ${results.length}개`);
       
+      // 디버깅: 전체 텍스트 중 일부 출력
+      if (CONFIG.DEBUG) {
+        console.log('[DOM] === 텍스트 샘플 (날짜/시간/레벨/좌석) ===');
+        let sampleCount = 0;
+        allTexts.forEach((item, i) => {
+          if (item.text.match(/^\d{1,2}\/\d{1,2}\s*\(/) || 
+              item.text.match(/^\d{2}:00$/) ||
+              item.text.match(/^(상급|중급|초급)$/) ||
+              item.text.match(/^\d+\/\d+$/) ||
+              item.text === '매진') {
+            console.log(`[DOM]   [${i}] ${item.text}`);
+            sampleCount++;
+            if (sampleCount >= 50) {
+              console.log(`[DOM]   ... (최대 50개만 표시)`);
+              return false; // forEach 중단은 불가능하지만 의미 전달
+            }
+          }
+        });
+        console.log(`[DOM] 샘플 출력 완료 (${sampleCount}개)`);
+      }
+      
+      console.log(`[DOM] 최종 결과: ${results.length}개 티켓 추출 완료`);
       return results;
     }, CONFIG);
     
-    console.log(`추출된 티켓 (${CONFIG.TARGET_LEVELS.join(', ')} 레벨):`, ticketData);
-    console.log(`총 ${ticketData.length}개 티켓 발견`);
+    console.log('[DEBUG] ========================================');
+    console.log(`[DEBUG] 추출된 티켓 (${CONFIG.TARGET_LEVELS.join(', ')} 레벨): ${ticketData.length}개`);
+    if (CONFIG.DEBUG && ticketData.length > 0) {
+      console.log('[DEBUG] 추출된 티켓 상세:');
+      ticketData.forEach((ticket, idx) => {
+        console.log(`[DEBUG]   [${idx + 1}] ${ticket.date} ${ticket.time} - ${ticket.level} - 좌${ticket.leftSeats}/우${ticket.rightSeats}`);
+      });
+    }
+    console.log('[DEBUG] ========================================');
     
-    // 타겟 날짜 필터링 - 디버깅을 위해 상세 로그 추가
-    console.log('타겟 날짜:', CONFIG.TARGET_DATES);
-    console.log('필터링 전 티켓 수:', ticketData.length);
-    
-    const filteredTickets = ticketData.filter(ticket => {
-      const isTargetDate = CONFIG.TARGET_DATES.includes(ticket.date);
-      if (!isTargetDate && CONFIG.DEBUG) {
-        console.log(`필터링됨: ${ticket.date} ${ticket.time} (타겟 날짜 아님)`);
-      }
-      return isTargetDate;
-    });
-    
-    console.log('필터링 후 티켓 수:', filteredTickets.length);
-    
-    // 최종 필터링 로직 개선
+    // 최종 필터링 로직
     let finalTickets = [];
     
     if (CONFIG.INCLUDE_ALL_DATES) {
       // 모든 날짜 포함
       finalTickets = ticketData;
-      console.log('모든 날짜의 티켓 포함');
+      console.log('[DEBUG] ⚠️ 모든 날짜의 티켓 포함 (INCLUDE_ALL_DATES=true)');
     } else {
       // 타겟 날짜만 필터링
+      console.log('[DEBUG] 타겟 날짜 필터링 시작...');
+      console.log('[DEBUG]   타겟 날짜:', CONFIG.TARGET_DATES);
+      console.log('[DEBUG]   필터링 전 티켓 수:', ticketData.length);
+      
+      const dateStats = {};
+      ticketData.forEach(ticket => {
+        if (!dateStats[ticket.date]) {
+          dateStats[ticket.date] = 0;
+        }
+        dateStats[ticket.date]++;
+      });
+      console.log('[DEBUG]   날짜별 티켓 수:', dateStats);
+      
       finalTickets = ticketData.filter(ticket => {
         const isTargetDate = CONFIG.TARGET_DATES.includes(ticket.date);
         if (!isTargetDate && CONFIG.DEBUG) {
-          console.log(`필터링됨: ${ticket.date} ${ticket.time} (타겟 날짜 아님)`);
+          console.log(`[DEBUG]   ⏭️ 필터링됨: ${ticket.date} ${ticket.time} ${ticket.level} (타겟 날짜 아님)`);
         }
         return isTargetDate;
       });
+      
+      console.log('[DEBUG]   필터링 후 티켓 수:', finalTickets.length);
+      if (CONFIG.DEBUG && finalTickets.length > 0) {
+        console.log('[DEBUG]   필터링된 티켓:');
+        finalTickets.forEach((ticket, idx) => {
+          console.log(`[DEBUG]     [${idx + 1}] ${ticket.date} ${ticket.time} - ${ticket.level} - 좌${ticket.leftSeats}/우${ticket.rightSeats}`);
+        });
+      }
     }
     
     // 이전 상태 로드
+    console.log('[DEBUG] ========================================');
+    console.log('[DEBUG] 상태 관리 시작...');
     let previousState = {};
     try {
       const stateData = await fs.readFile('state.json', 'utf8');
       previousState = JSON.parse(stateData);
+      const previousKeys = Object.keys(previousState);
+      console.log(`[DEBUG] ✅ 이전 상태 로드 완료: ${previousKeys.length}개 티켓 기록`);
+      if (CONFIG.DEBUG && previousKeys.length > 0) {
+        console.log('[DEBUG] 이전 상태 샘플 (최대 5개):');
+        previousKeys.slice(0, 5).forEach(key => {
+          const prev = previousState[key];
+          console.log(`[DEBUG]   ${key}: ${prev.date} ${prev.time} ${prev.level} - 좌${prev.leftSeats}/우${prev.rightSeats}`);
+        });
+      }
     } catch (e) {
-      console.log('이전 상태 없음, 새로 시작');
+      console.log('[DEBUG] ⚠️ 이전 상태 없음, 새로 시작');
+      console.log(`[DEBUG]   에러: ${e.message}`);
     }
     
     // 새로운 티켓 찾기
+    console.log('[DEBUG] 새로운 티켓 검색 중...');
     const newTickets = [];
+    let skippedCount = 0;
+    let increasedCount = 0;
+    
     finalTickets.forEach(ticket => {
       const key = `${ticket.date}-${ticket.time}-${ticket.leftSeats}/${ticket.rightSeats}`;
       
@@ -323,17 +418,26 @@ async function scrapeWavePark() {
       if (!previousState[key]) {
         // 완전히 새로운 티켓
         newTickets.push(ticket);
-        console.log(`✅ 새 티켓: ${ticket.date} ${ticket.time} - ${ticket.raw}`);
+        console.log(`[DEBUG] ✅ 새 티켓 발견: ${ticket.date} ${ticket.time} ${ticket.level} - 좌${ticket.leftSeats}/우${ticket.rightSeats} (${ticket.raw})`);
       } else if (previousState[key].totalSeats < ticket.totalSeats) {
         // 좌석이 늘어난 경우
         newTickets.push(ticket);
-        console.log(`📈 좌석 증가: ${ticket.date} ${ticket.time} - ${previousState[key].totalSeats} -> ${ticket.totalSeats}`);
+        increasedCount++;
+        console.log(`[DEBUG] 📈 좌석 증가: ${ticket.date} ${ticket.time} ${ticket.level} - ${previousState[key].totalSeats}석 -> ${ticket.totalSeats}석`);
+      } else {
+        skippedCount++;
+        if (CONFIG.DEBUG) {
+          console.log(`[DEBUG] ⏭️ 기존 티켓 (변화 없음): ${ticket.date} ${ticket.time} ${ticket.level} - 좌${ticket.leftSeats}/우${ticket.rightSeats}`);
+        }
       }
     });
     
+    console.log(`[DEBUG] 검색 완료 - 새 티켓: ${newTickets.length}개, 좌석 증가: ${increasedCount}개, 기존: ${skippedCount}개`);
+    
     // 알림 발송
+    console.log('[DEBUG] ========================================');
     if (newTickets.length > 0) {
-      console.log(`\n🎯 새로운 티켓 ${newTickets.length}개 발견!`);
+      console.log(`[DEBUG] 🎯 새로운 티켓 ${newTickets.length}개 발견!`);
       
       // 레벨별로 그룹화하여 출력
       const ticketsByLevel = {};
@@ -344,22 +448,28 @@ async function scrapeWavePark() {
         ticketsByLevel[ticket.level].push(ticket);
       });
       
+      console.log('[DEBUG] 레벨별 티켓 분류:');
       Object.keys(ticketsByLevel).forEach(level => {
-        console.log(`\n[${level}]`);
+        console.log(`[DEBUG]   [${level}] ${ticketsByLevel[level].length}개`);
         ticketsByLevel[level].forEach(t => {
-          console.log(`  - ${t.date} ${t.time}: 좌 ${t.leftSeats} / 우 ${t.rightSeats}`);
+          console.log(`[DEBUG]     - ${t.date} ${t.time}: 좌 ${t.leftSeats} / 우 ${t.rightSeats}`);
         });
       });
       
+      console.log('[DEBUG] 알림 발송 시작...');
       await sendNotifications(newTickets);
     } else {
-      console.log(`\n😔 새로운 ${CONFIG.TARGET_LEVELS.join('/')} 티켓 없음`);
+      console.log(`[DEBUG] 😔 새로운 ${CONFIG.TARGET_LEVELS.join('/')} 티켓 없음`);
       if (finalTickets.length > 0) {
-        console.log(`(기존 티켓 ${finalTickets.length}개는 이미 알림 발송됨)`);
+        console.log(`[DEBUG]   (기존 티켓 ${finalTickets.length}개는 이미 알림 발송됨)`);
+      } else {
+        console.log(`[DEBUG]   (타겟 날짜/레벨에 해당하는 티켓이 없음)`);
       }
     }
     
     // 상태 저장
+    console.log('[DEBUG] ========================================');
+    console.log('[DEBUG] 상태 저장 시작...');
     const newState = {};
     finalTickets.forEach(ticket => {
       const key = `${ticket.date}-${ticket.time}-${ticket.leftSeats}/${ticket.rightSeats}`;
@@ -369,24 +479,40 @@ async function scrapeWavePark() {
       };
     });
     await fs.writeFile('state.json', JSON.stringify(newState, null, 2));
-    console.log('상태 저장 완료');
+    console.log(`[DEBUG] ✅ 상태 저장 완료: ${Object.keys(newState).length}개 티켓 기록`);
+    
+    console.log('[DEBUG] ========================================');
+    console.log('[DEBUG] ✅ 스크래핑 완료');
+    console.log(`[DEBUG] 최종 결과: ${finalTickets.length}개 티켓`);
+    console.log('[DEBUG] ========================================');
     
     return finalTickets;
     
   } catch (error) {
-    console.error('스크래핑 에러:', error);
+    console.error('[ERROR] ========================================');
+    console.error('[ERROR] 스크래핑 에러 발생!');
+    console.error('[ERROR] 에러 타입:', error.constructor.name);
+    console.error('[ERROR] 에러 메시지:', error.message);
+    console.error('[ERROR] 스택 트레이스:');
+    console.error(error.stack);
+    console.error('[ERROR] ========================================');
     throw error;
   } finally {
     if (browser) {
+      console.log('[DEBUG] 브라우저 종료 중...');
       await browser.close();
+      console.log('[DEBUG] ✅ 브라우저 종료 완료');
     }
   }
 }
 
 // ===== 알림 발송 함수 =====
 async function sendNotifications(tickets) {
+  console.log(`[NOTIFICATION] 알림 발송 시작: ${tickets.length}개 티켓`);
+  
   // 1. Telegram 알림
   // if (CONFIG.TELEGRAM_BOT_TOKEN && CONFIG.TELEGRAM_CHAT_ID) {
+  //   console.log('[NOTIFICATION] Telegram 알림 발송 시도...');
   //   const message = formatTelegramMessage(tickets);
     
   //   try {
@@ -404,15 +530,24 @@ async function sendNotifications(tickets) {
   //     );
       
   //     if (response.ok) {
-  //       console.log('✅ Telegram 알림 발송 성공');
+  //       console.log('[NOTIFICATION] ✅ Telegram 알림 발송 성공');
+  //     } else {
+  //       const errorText = await response.text();
+  //       console.error(`[NOTIFICATION] ❌ Telegram 알림 실패: ${response.status} - ${errorText}`);
   //     }
   //   } catch (error) {
-  //     console.error('Telegram 알림 실패:', error);
+  //     console.error('[NOTIFICATION] ❌ Telegram 알림 에러:', error.message);
   //   }
+  // } else {
+  //   console.log('[NOTIFICATION] ⏭️ Telegram 알림 설정 없음 (토큰 또는 채팅 ID 없음)');
   // }
   
   // 2. Webhook (Google Apps Script) 알림
   if (CONFIG.WEBHOOK_URL) {
+    console.log('[NOTIFICATION] Webhook 알림 발송 시도...');
+    console.log(`[NOTIFICATION]   URL: ${CONFIG.WEBHOOK_URL.substring(0, 50)}...`);
+    console.log(`[NOTIFICATION]   티켓 수: ${tickets.length}개`);
+    
     try {
       const response = await fetch(CONFIG.WEBHOOK_URL, {
         method: 'POST',
@@ -421,12 +556,26 @@ async function sendNotifications(tickets) {
       });
       
       if (response.ok) {
-        console.log('✅ Webhook 알림 발송 성공');
+        console.log('[NOTIFICATION] ✅ Webhook 알림 발송 성공');
+        const responseText = await response.text();
+        if (CONFIG.DEBUG && responseText) {
+          console.log(`[NOTIFICATION]   응답: ${responseText.substring(0, 100)}`);
+        }
+      } else {
+        const errorText = await response.text();
+        console.error(`[NOTIFICATION] ❌ Webhook 알림 실패: ${response.status} - ${errorText}`);
       }
     } catch (error) {
-      console.error('Webhook 알림 실패:', error);
+      console.error('[NOTIFICATION] ❌ Webhook 알림 에러:', error.message);
+      if (CONFIG.DEBUG) {
+        console.error('[NOTIFICATION]   스택:', error.stack);
+      }
     }
+  } else {
+    console.log('[NOTIFICATION] ⏭️ Webhook 알림 설정 없음 (WEBHOOK_URL 없음)');
   }
+  
+  console.log('[NOTIFICATION] 알림 발송 완료');
 }
 
 // ===== 메시지 포맷팅 =====
@@ -459,13 +608,24 @@ function formatTelegramMessage(tickets) {
 
 // ===== 실행 =====
 if (require.main === module) {
+  const startTime = Date.now();
+  console.log(`[MAIN] 스크래퍼 시작 시간: ${new Date().toISOString()}`);
+  
   scrapeWavePark()
-    .then(() => {
-      console.log('스크래핑 완료');
+    .then((tickets) => {
+      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+      console.log(`[MAIN] ========================================`);
+      console.log(`[MAIN] ✅ 스크래핑 완료 (소요 시간: ${duration}초)`);
+      console.log(`[MAIN] 최종 티켓 수: ${tickets.length}개`);
+      console.log(`[MAIN] ========================================`);
       process.exit(0);
     })
     .catch(error => {
-      console.error('스크래핑 실패:', error);
+      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+      console.error(`[MAIN] ========================================`);
+      console.error(`[MAIN] ❌ 스크래핑 실패 (소요 시간: ${duration}초)`);
+      console.error(`[MAIN] 에러: ${error.message}`);
+      console.error(`[MAIN] ========================================`);
       process.exit(1);
     });
 }
